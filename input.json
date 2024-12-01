@@ -1,0 +1,50 @@
+{
+  "main": {
+    "render_mode": "human",
+    "continuous": true,
+    "gravity": -1.8,
+    "enable_wind": true,
+    "wind_power": 10.0,
+    "turbulence_power": 1.0
+  },
+  "initial_position_and_velocity": {
+    "density": 5.0,
+    "friction": 0.1,
+    "restitution": 0.0
+  },
+  "observation_space": {
+    "low_x": -2.5,
+    "low_y": -2.5,
+    "high_x": 2.5,
+    "high_y": 2.5
+  },
+  "reward_function": {
+    "shaping_0": -100,
+    "shaping_1": 100,
+    "shaping_2": 100,
+    "shaping_3": 10,
+    "shaping_4": 10,
+    "m_power_coef": 0.3
+  },
+  "constants": {
+    "FPS": 50,
+    "SCALE": 30.0,
+    "MAIN_ENGINE_POWER": 13.0,
+    "SIDE_ENGINE_POWER": 0.6,
+    "INITIAL_RANDOM": 1000.0,
+    "LEG_AWAY": 20,
+    "LEG_DOWN": 18,
+    "LEG_W": 2,
+    "LEG_H": 8,
+    "LEG_SPRING_TORQUE": 40,
+    "SIDE_ENGINE_HEIGHT": 14,
+    "SIDE_ENGINE_AWAY": 12,
+    "MAIN_ENGINE_Y_LOCATION": 4,
+    "VIEWPORT_W": 600,
+    "VIEWPORT_H": 400
+  },
+  "enable_wind": {
+    "LOW_BORDER": -9999,
+    "HIGH_BORDER": 9999
+  }
+}
