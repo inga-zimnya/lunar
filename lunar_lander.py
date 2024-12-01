@@ -2,9 +2,10 @@ __credits__ = ["Andrea PIERRÉ"]
 
 import math
 from typing import TYPE_CHECKING, Optional
-
-import numpy as np
 import pygame
+
+from PIL import Image
+import numpy as np
 import json
 
 import gymnasium as gym
@@ -88,12 +89,14 @@ class LunarLander(gym.Env, EzPickle):
 
     def __init__(
         self,
-        render_mode: Optional[str] = None,
-        continuous: bool = False,
-        gravity: float = -10.0,
-        enable_wind: bool = False,
-        wind_power: float = 15.0,
-        turbulence_power: float = 1.5,
+            config_path: str = "input.json",
+            render_mode: Optional[str] = None,
+            continuous: Optional[bool] = None,
+            gravity: Optional[float] = None,
+            enable_wind: Optional[bool] = None,
+            wind_power: Optional[float] = None,
+            turbulence_power: Optional[float] = None,
+            experiment_number: int = 1
     ):
         EzPickle.__init__(
             self,
@@ -105,46 +108,69 @@ class LunarLander(gym.Env, EzPickle):
             turbulence_power,
         )
 
-        self.results = None
-        self.experiment_number = None
+        # Load configuration from JSON
+        with open(config_path, "r") as f:
+            config = json.load(f)
+
+        constants = config["constants"]
+        main_config = config["main"]
+        initial_position_and_velocity_config = config["initial_position_and_velocity"]
+        obs_space_config = config["observation_space"]
+
+        # Initialize variables from JSON or use provided parameters
+        self.experiment_number = experiment_number
+        self.render_mode = render_mode or main_config["render_mode"]
+        self.continuous = continuous if continuous is not None else main_config["continuous"]
+        self.gravity = gravity if gravity is not None else main_config["gravity"]
+        self.enable_wind = enable_wind if enable_wind is not None else main_config["enable_wind"]
+        self.wind_power = wind_power if wind_power is not None else main_config["wind_power"]
+        self.turbulence_power = turbulence_power if turbulence_power is not None else main_config["turbulence_power"]
+
+        self.density = initial_position_and_velocity_config['density']
+        self.friction = initial_position_and_velocity_config['friction']
+        self.restitution = initial_position_and_velocity_config['restitution']
+
+        # Metadata setup
+        self.metadata["render_fps"] = constants["FPS"]
+
+        gravity = config["main"].get("gravity", -10.0)
+
         assert (
-            -12.0 < gravity and gravity < 0.0
+                -12.0 < gravity < 0.0
         ), f"gravity (current value: {gravity}) must be between -12 and 0"
         self.gravity = gravity
 
-        if 0.0 > wind_power or wind_power > 20.0:
+        # print(wind_power, main_config["wind_power"])
+
+        if 0.0 > self.wind_power or self.wind_power > 20.0:
             gym.logger.warn(
                 f"wind_power value is recommended to be between 0.0 and 20.0, (current value: {wind_power})"
             )
-        self.wind_power = wind_power
 
-        if 0.0 > turbulence_power or turbulence_power > 2.0:
+        if 0.0 > self.turbulence_power or self.turbulence_power > 2.0:
             gym.logger.warn(
                 f"turbulence_power value is recommended to be between 0.0 and 2.0, (current value: {turbulence_power})"
             )
-        self.turbulence_power = turbulence_power
 
-        self.enable_wind = enable_wind
+        self.isopen = True
+        self.world = Box2D.b2World(gravity=(0, self.gravity))
 
         self.screen: pygame.Surface = None
         self.clock = None
-        self.isopen = True
-        self.world = Box2D.b2World(gravity=(0, gravity))
+
         self.moon = None
         self.lander: Optional[Box2D.b2Body] = None
         self.particles = []
 
         self.prev_reward = None
 
-        self.continuous = continuous
-
         low = np.array(
             [
                 # these are bounds for position
                 # realistically the environment should have ended
                 # long before we reach more than 50% outside
-                -2.5,  # x coordinate
-                -2.5,  # y coordinate
+                obs_space_config["low_x"],
+                obs_space_config["low_y"],
                 # velocity bounds is 5x rated speed
                 -10.0,
                 -10.0,
@@ -159,8 +185,8 @@ class LunarLander(gym.Env, EzPickle):
                 # these are bounds for position
                 # realistically the environment should have ended
                 # long before we reach more than 50% outside
-                2.5,  # x coordinate
-                2.5,  # y coordinate
+                obs_space_config["high_x"],
+                obs_space_config["high_y"],
                 # velocity bounds is 5x rated speed
                 10.0,
                 10.0,
@@ -183,7 +209,25 @@ class LunarLander(gym.Env, EzPickle):
             # Nop, fire left engine, main engine, right engine
             self.action_space = spaces.Discrete(4)
 
-        self.render_mode = render_mode
+        # Simulation state tracking
+        self.results = {
+            "experiment_number": self.experiment_number,
+            "input_parameters": {
+                "gravity": self.gravity,
+                "wind_power": self.wind_power,
+                "turbulence_power": self.turbulence_power,
+                "density": self.density,
+                "friction": self.friction,
+                "restitution": self.restitution
+            },
+            "intermediate_states": [],
+        }
+
+        print("results", self.results)
+
+        # Rendering and frame capture
+        self.frames = []
+
 
     def _destroy(self):
         if not self.moon:
@@ -258,11 +302,11 @@ class LunarLander(gym.Env, EzPickle):
                 shape=polygonShape(
                     vertices=[(x / SCALE, y / SCALE) for x, y in LANDER_POLY]
                 ),
-                density=5.0,
-                friction=0.1,
+                density=self.density,
+                friction=self.friction,
                 categoryBits=0x0010,
                 maskBits=0x001,  # collide only with ground
-                restitution=0.0,
+                restitution=self.restitution,
             ),  # 0.99 bouncy
         )
         self.lander.color1 = (128, 102, 230)
@@ -322,12 +366,16 @@ class LunarLander(gym.Env, EzPickle):
         self.drawlist = [self.lander] + self.legs
 
         self.experiment_number += 1
-        self.results = []
-        self.frames = []
+        # self.results = []
+        # self.frames = []
 
         if self.render_mode == "human":
             self.render()
         return self.step(np.array([0, 0]) if self.continuous else 0)[0], {}
+
+        # self.frames.clear()
+        self.results["intermediate_states"].clear()
+        print('clear', self.results)
 
     def _create_particle(self, mass, x, y, ttl):
         p = self.world.CreateDynamicBody(
@@ -352,6 +400,7 @@ class LunarLander(gym.Env, EzPickle):
             self.world.DestroyBody(self.particles.pop(0))
 
     def step(self, action):
+        print(self.results)
         assert self.lander is not None
 
         # Update wind and apply to the lander
@@ -396,7 +445,12 @@ class LunarLander(gym.Env, EzPickle):
                 action
             ), f"{action!r} ({type(action)}) invalid "
 
-        # Apply Engine Impulses
+        # print(self.lander.position)
+        position = tuple(self.lander.position)  # Replace with real position
+        velocity = tuple(self.lander.linearVelocity)  # Replace with real velocity
+        angle = self.lander.angle  # Replace with real angle
+        # TODO: what is acceleration
+        inertia = self.lander.inertia  # Replace with real acceleration
 
         # Tip is the (X and Y) components of the rotation of the lander.
         tip = (math.sin(self.lander.angle), math.cos(self.lander.angle))
@@ -542,8 +596,20 @@ class LunarLander(gym.Env, EzPickle):
             terminated = True
             reward = +100
 
+        # Log the state
+        print(self.results)
+        self.results["intermediate_states"].append({
+            "time_step": len(self.results["intermediate_states"]) + 1,
+            "position": position,
+            "velocity": velocity,
+            "angle": angle,
+            "inertia": inertia,
+        })
+
+
         if self.render_mode == "human":
             self.render()
+
         # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return np.array(state, dtype=np.float32), reward, terminated, False, {}
 
@@ -671,6 +737,74 @@ class LunarLander(gym.Env, EzPickle):
             pygame.quit()
             self.isopen = False
 
+    def save_results(self, output_path: str = "output.json"):
+        """Save the results of the experiment to a JSON file."""
+        with open(output_path, "w") as f:
+            json.dump(self.results, f, indent=4)
+
+def save_gif(pixel_arrays, output_gif_path, duration=100):
+    """
+    Creates a GIF from a list of NumPy pixel arrays.
+
+    Args:
+        pixel_arrays: A list of 2D or 3D NumPy arrays representing image frames.
+                      2D arrays are assumed to be grayscale, 3D arrays are RGB(A).
+        output_gif_path: The path where the output GIF will be saved.
+        duration: The duration of each frame in milliseconds.
+    """
+    try:
+        frames = []
+        for pixel_array in pixel_arrays:
+            try:
+                # Convert to NumPy array if necessary
+                if not isinstance(pixel_array, np.ndarray):
+                    pixel_array = np.array(pixel_array)
+
+
+                # Automatically determine mode based on array dimensions
+                if pixel_array.ndim == 2:  # Grayscale
+                    img = Image.fromarray(pixel_array.astype(np.uint8), mode="L")
+
+                elif pixel_array.ndim == 3:  # RGB or RGBA
+                    if pixel_array.shape[2] == 3:
+                        img = Image.fromarray(pixel_array.astype(np.uint8), mode="RGB")
+
+                    elif pixel_array.shape[2] == 4:
+                        img = Image.fromarray(pixel_array.astype(np.uint8), mode="RGBA")
+                    else:
+                        raise ValueError("3D pixel arrays must have 3 (RGB) or 4 (RGBA) channels in the last dimension.")
+                else:
+                    raise ValueError("Pixel arrays must be 2D (grayscale) or 3D (RGB/RGBA).")
+
+
+
+
+                frames.append(img)
+            except ValueError as e: # Catch array dimension issues
+                print(f"Error processing pixel array: {e}")
+                return
+            except Exception as e:
+                print(f"Error processing image: {e}")
+                return
+
+
+        if frames:  # Make GIF only if there are valid frames
+            frames[0].save(
+                output_gif_path,
+                save_all=True,
+                append_images=frames[1:],
+                optimize=False,
+                duration=duration,
+                loop=0,
+            )
+            print(f"GIF created successfully: {output_gif_path}")
+        else:
+            print("No valid image data to create GIF.")
+
+
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 def heuristic(env, s):
     """
@@ -693,7 +827,6 @@ def heuristic(env, s):
     Returns:
          a: The heuristic to be fed into the step function defined above to determine the next step and reward.
     """
-
     angle_targ = s[0] * 0.5 + s[2] * 1.0  # angle should point towards center
     if angle_targ > 0.4:
         angle_targ = 0.4  # more than 0.4 radians (22 degrees) is bad
@@ -726,6 +859,7 @@ def heuristic(env, s):
     return a
 
 
+frames = []
 def demo_heuristic_lander(env, seed=None, render=False):
     total_reward = 0
     steps = 0
@@ -734,6 +868,8 @@ def demo_heuristic_lander(env, seed=None, render=False):
         a = heuristic(env, s)
         s, r, terminated, truncated, info = step_api_compatibility(env.step(a), True)
         total_reward += r
+
+        frames.append(env.render())
 
         if render:
             still_open = env.render()
@@ -746,6 +882,10 @@ def demo_heuristic_lander(env, seed=None, render=False):
         steps += 1
         if terminated or truncated:
             break
+
+    env.save_results("output.json")
+    save_gif(frames, "simulation.gif")
+
     if render:
         env.close()
     return total_reward
@@ -765,12 +905,13 @@ if __name__ == "__main__":
     with open('input.json', 'r') as file:
         params = json.load(file)
 
-    env = gym.make("LunarLander-v3",
-                   render_mode=params["main"]["render_mode"],
-                   continuous=params["main"]["continuous"],
-                   gravity=params["main"]["gravity"],
-                   enable_wind=params["main"]["enable_wind"],
-                   wind_power=params["main"]["wind_power"],
-                   turbulence_power=params["main"]["turbulence_power"])
+    lander = LunarLander(config_path="input.json", experiment_number=1)
+    # env = gym.make("LunarLander-v3",
+    #                render_mode=params["main"]["render_mode"],
+    #                continuous=params["main"]["continuous"],
+    #                gravity=params["main"]["gravity"],
+    #                enable_wind=params["main"]["enable_wind"],
+    #                wind_power=params["main"]["wind_power"],
+    #                turbulence_power=params["main"]["turbulence_power"])
 
-    demo_heuristic_lander(env, render=True)
+    demo_heuristic_lander(lander, render=False)

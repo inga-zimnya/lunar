@@ -1,9 +1,9 @@
 {
   "main": {
-    "render_mode": "human",
+    "render_mode": "rgb_array",
     "continuous": true,
-    "gravity": -1.8,
-    "enable_wind": true,
+    "gravity": -9.8,
+    "enable_wind": false,
     "wind_power": 10.0,
     "turbulence_power": 1.0
   },
