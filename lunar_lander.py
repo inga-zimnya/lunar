@@ -116,6 +116,7 @@ class LunarLander(gym.Env, EzPickle):
         main_config = config["main"]
         initial_position_and_velocity_config = config["initial_position_and_velocity"]
         obs_space_config = config["observation_space"]
+        reward_function_config = config["reward_function"]
 
         # Initialize variables from JSON or use provided parameters
         self.experiment_number = experiment_number
@@ -129,6 +130,18 @@ class LunarLander(gym.Env, EzPickle):
         self.density = initial_position_and_velocity_config['density']
         self.friction = initial_position_and_velocity_config['friction']
         self.restitution = initial_position_and_velocity_config['restitution']
+
+        self.low_x = obs_space_config['low_x']
+        self.low_y = obs_space_config['low_y']
+        self.high_x = obs_space_config['high_x']
+        self.high_y = obs_space_config['high_y']
+
+        self.shaping_0 = reward_function_config['shaping_0']
+        self.shaping_1 = reward_function_config['shaping_1']
+        self.shaping_2 = reward_function_config['shaping_2']
+        self.shaping_3 = reward_function_config['shaping_3']
+        self.shaping_4 = reward_function_config['shaping_4']
+        self.m_power_coef = reward_function_config['m_power_coef']
 
         # Metadata setup
         self.metadata["render_fps"] = constants["FPS"]
@@ -169,8 +182,8 @@ class LunarLander(gym.Env, EzPickle):
                 # these are bounds for position
                 # realistically the environment should have ended
                 # long before we reach more than 50% outside
-                obs_space_config["low_x"],
-                obs_space_config["low_y"],
+                self.low_x,
+                self.low_y,
                 # velocity bounds is 5x rated speed
                 -10.0,
                 -10.0,
@@ -185,8 +198,8 @@ class LunarLander(gym.Env, EzPickle):
                 # these are bounds for position
                 # realistically the environment should have ended
                 # long before we reach more than 50% outside
-                obs_space_config["high_x"],
-                obs_space_config["high_y"],
+                self.high_x,
+                self.high_y,
                 # velocity bounds is 5x rated speed
                 10.0,
                 10.0,
@@ -218,7 +231,17 @@ class LunarLander(gym.Env, EzPickle):
                 "turbulence_power": self.turbulence_power,
                 "density": self.density,
                 "friction": self.friction,
-                "restitution": self.restitution
+                "restitution": self.restitution,
+                "low_x": self.low_x,
+                "low_y": self.low_y,
+                "high_x": self.high_x,
+                "high_y": self.high_y,
+                "shaping_0": self.shaping_0,
+                "shaping_1": self.shaping_1,
+                "shaping_2": self.shaping_2,
+                "shaping_3": self.shaping_3,
+                "shaping_4": self.shaping_4,
+                "m_power_coef": self.m_power_coef
             },
             "intermediate_states": [],
         }
@@ -572,11 +595,11 @@ class LunarLander(gym.Env, EzPickle):
 
         reward = 0
         shaping = (
-            -100 * np.sqrt(state[0] * state[0] + state[1] * state[1])
-            - 100 * np.sqrt(state[2] * state[2] + state[3] * state[3])
-            - 100 * abs(state[4])
-            + 10 * state[6]
-            + 10 * state[7]
+            self.shaping_0 * np.sqrt(state[0] * state[0] + state[1] * state[1])
+            - self.shaping_1 * np.sqrt(state[2] * state[2] + state[3] * state[3])
+            - self.shaping_2 * abs(state[4])
+            + self.shaping_3 * state[6]
+            + self.shaping_4 * state[7]
         )  # And ten points for legs contact, the idea is if you
         # lose contact again after landing, you get negative reward
         if self.prev_shaping is not None:
@@ -584,7 +607,7 @@ class LunarLander(gym.Env, EzPickle):
         self.prev_shaping = shaping
 
         reward -= (
-            m_power * 0.30
+            m_power * self.m_power_coef
         )  # less fuel spent is better, about -30 for heuristic landing
         reward -= s_power * 0.03
 
